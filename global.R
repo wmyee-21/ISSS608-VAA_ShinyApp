@@ -40,16 +40,9 @@ messages_tbl <- readr::read_csv(
   )
 )
 
-rounds_tbl <- readr::read_csv(
-  "data/rounds_clean.csv",
-  col_types = readr::cols(
-    round_idx      = readr::col_integer(),
-    round_hour_dt  = readr::col_datetime(),
-    n_messages     = readr::col_integer(),
-    n_participants = readr::col_integer(),
-    .default       = readr::col_character()
-  )
-)
+# Note: rounds_clean.csv is not loaded. No tab uses the round-narrative table, so
+# the app runs from the message log alone. Add it back here if a future tab needs
+# the event_headline / event_narrative text.
 
 # --- Fixed lookups (report Section 4.3) --------------------------------------
 agent_labels <- c(
