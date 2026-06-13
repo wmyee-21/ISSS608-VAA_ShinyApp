@@ -136,9 +136,13 @@ sec_upload_server <- function(id) {
         lapply(names(REQUIRED_FIELDS), function(f)
           selectInput(ns(paste0("map_", f)), paste0(REQUIRED_FIELDS[[f]], "  *"),
                       choices = cols, selected = guess_col(f, cols))),
-        lapply(names(OPTIONAL_FIELDS), function(f)
+        lapply(names(OPTIONAL_FIELDS), function(f) {
+          # auto-select a matching column if one exists, otherwise (none)
+          g <- guess_col(f, cols)
+          sel <- if (stringr::str_detect(tolower(g), substr(f, 1, 5))) g else "(none)"
           selectInput(ns(paste0("map_", f)), OPTIONAL_FIELDS[[f]],
-                      choices = c("(none)", cols), selected = "(none)"))
+                      choices = c("(none)", cols), selected = sel)
+        })
       )
     })
 
