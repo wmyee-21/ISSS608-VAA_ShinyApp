@@ -51,6 +51,15 @@ sec_upload_ui <- function(id) {
       uiOutput(ns("channels")),
       actionButton(ns("confirm"), "Confirm and load data", class = "btn-primary mt-2")
     ),
+    card(card_header("About this app"),
+         tags$p(
+           "This tool surfaces hidden communication breaches in a multi-agent ",
+           "message log and traces each signal back to the messages that prove it. ",
+           tags$b("To start"), ", load a CSV here or use the built-in example, then ",
+           "open the ", tags$b("Activity"), " tab and set the baseline, which defines ",
+           "what counts as normal versus suspect for the abnormality analysis. Work through ",
+           tags$b("Activity, Bypass, Network and Topics"),
+           ", and click any chart to read the underlying messages.")),
     card(card_header("How to use this tab"),
          tags$ol(
            tags$li(tags$b("Upload a CSV"),
