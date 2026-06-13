@@ -38,12 +38,74 @@ guess_col <- function(field, cols) {
   if (length(hit)) hit[1] else cols[1]
 }
 
+# Default classification for a channel, by name. The analyst can override.
+# The six known company channels are mapped explicitly (the data is assumed to be
+# from the same company, possibly a different timeframe); anything unrecognised
+# falls back to a name heuristic.
+guess_channel_class <- function(ch) {
+  known <- c(comms_huddle    = "monitored",   # internal, the Judge watches it
+             one_on_one_chat = "monitored",
+             side_huddle     = "internal",    # internal but unwatched
+             official_post   = "public",
+             personal_post   = "public",
+             anonymous_post  = "public")
+  k <- tolower(ch)
+  if (k %in% names(known)) return(unname(known[[k]]))
+  if (grepl("post|public|anon|flex|tweet|external", k)) "public"
+  else if (grepl("side|shadow|back|private|dm", k))     "internal"
+  else                                                  "monitored"
+}
+
+# Transform the company's standard JSON export into the canonical message schema.
+# Structure: { rounds: [ { communications: [ { agent_id, channel, recipients,
+# content, internal_state{reacting,rationalizing,deliberating}, ... } ] } ] }.
+# Recipients arrive as role tokens (or ALL); they are resolved to full agent ids
+# using a role-to-agent map learned from the file itself.
+transform_company_json <- function(path) {
+  doc    <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+  rounds <- doc$rounds %||% list()
+
+  role2agent <- list()
+  for (rd in rounds) for (m in rd$communications %||% list()) {
+    if (!is.null(m$agent_role) && !is.null(m$agent_id)) role2agent[[m$agent_role]] <- m$agent_id
+  }
+  recip_alias <- c(social_manager = "social_media")  # recipient token -> agent_role
+
+  resolve <- function(tok) {
+    if (identical(tok, "ALL")) return("ALL")
+    role <- if (tok %in% names(recip_alias)) recip_alias[[tok]] else tok
+    ag   <- role2agent[[role]]
+    if (is.null(ag)) tok else ag
+  }
+
+  rows <- list()
+  for (i in seq_along(rounds)) {
+    for (m in rounds[[i]]$communications %||% list()) {
+      recs <- m$recipients %||% list()
+      rc   <- if (length(recs) == 0) "" else
+                paste(vapply(recs, resolve, character(1)), collapse = ";")
+      isr  <- m$internal_state %||% list()
+      rows[[length(rows) + 1]] <- tibble::tibble(
+        round_idx      = as.integer(i),
+        agent_id       = m$agent_id           %||% NA_character_,
+        channel        = m$channel            %||% NA_character_,
+        recipients_csv = rc,
+        content        = m$content            %||% NA_character_,
+        reacting       = isr$reacting         %||% NA_character_,
+        rationalizing  = isr$rationalizing    %||% NA_character_,
+        deliberating   = isr$deliberating     %||% NA_character_)
+    }
+  }
+  dplyr::bind_rows(rows)
+}
+
 sec_upload_ui <- function(id) {
   ns <- NS(id)
   layout_sidebar(
     sidebar = sidebar(
       width = "32%",
-      fileInput(ns("file"), "Upload a message log (CSV)", accept = c(".csv", "text/csv")),
+      fileInput(ns("file"), "Upload a message log (CSV or company JSON)",
+                accept = c(".csv", ".json", "text/csv", "application/json")),
       downloadButton(ns("template"), "Download CSV template", class = "btn-sm"),
       hr(),
       uiOutput(ns("mapping")),
@@ -55,16 +117,18 @@ sec_upload_ui <- function(id) {
          tags$p(
            "This tool surfaces hidden communication breaches in a multi-agent ",
            "message log and traces each signal back to the messages that prove it. ",
-           tags$b("To start"), ", load a CSV here or use the built-in example, then ",
+           tags$b("To start"), ", load a CSV or the company JSON export here, or use ",
+           "the built-in example, then ",
            "open the ", tags$b("Activity"), " tab and set the baseline, which defines ",
            "what counts as normal versus suspect for the abnormality analysis. Work through ",
            tags$b("Activity, Bypass, Network and Topics"),
            ", and click any chart to read the underlying messages.")),
     card(card_header("How to use this tab"),
          tags$ol(
-           tags$li(tags$b("Upload a CSV"),
-                   " of messages, one row per message. Use the ",
-                   tags$b("Download CSV template"), " button if you need the format."),
+           tags$li(tags$b("Upload your data"),
+                   " — a one-row-per-message CSV, or the company's standard JSON ",
+                   "export (which is mapped automatically). Use the ",
+                   tags$b("Download CSV template"), " if you need the CSV format."),
            tags$li(tags$b("Map your columns."),
                    " For each field the app needs (round, sender, channel, recipients, ",
                    "message), choose the matching column from your file. The dropdowns ",
@@ -105,13 +169,28 @@ sec_upload_server <- function(id) {
           reacting = NA, rationalizing = NA, deliberating = NA), f)
       })
 
-    raw <- reactive({
+    # Is the uploaded file the company JSON export rather than a CSV?
+    is_json <- reactive({
       req(input$file)
+      tolower(tools::file_ext(input$file$name)) == "json"
+    })
+
+    raw <- reactive({
+      req(input$file, !is_json())
       readr::read_csv(input$file$datapath, show_col_types = FALSE)
     })
 
     # --- column mapping ------------------------------------------------------
     output$mapping <- renderUI({
+      # Company JSON: fields are mapped automatically, nothing to do here.
+      if (!is.null(input$file) && is_json()) {
+        return(tagList(
+          tags$strong("Map your columns"),
+          helpText("Detected the company JSON export. Its fields are mapped to the ",
+                   "app's schema automatically, so there is nothing to map. Continue ",
+                   "to classify the channels below.")
+        ))
+      }
       # Before a file is uploaded, show a greyed example so the instructions make sense.
       if (is.null(input$file)) {
         ex <- c(round_idx = "round", agent_id = "sender", channel = "channel",
@@ -148,6 +227,9 @@ sec_upload_server <- function(id) {
 
     # canonical-schema tibble
     mapped <- reactive({
+      req(input$file)
+      # Company JSON: transform straight to the canonical schema.
+      if (is_json()) return(transform_company_json(input$file$datapath))
       df <- raw(); req(input$map_round_idx, input$map_agent_id, input$map_channel,
                        input$map_recipients, input$map_content)
       out <- tibble::tibble(
@@ -194,7 +276,7 @@ sec_upload_server <- function(id) {
                  "a post on a Public or Internal channel with no Monitored trace."),
         lapply(ch, function(c)
           selectInput(ns(paste0("ch_", make.names(c))), c, choices = cls,
-                      selected = "monitored"))
+                      selected = guess_channel_class(c)))
       )
     })
 
