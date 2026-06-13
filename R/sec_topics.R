@@ -49,8 +49,13 @@ sec_topics_ui <- function(id) {
   )
 }
 
-sec_topics_server <- function(id, messages) {
+sec_topics_server <- function(id, messages, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
+
+    # Refresh the round slider when a new dataset loads.
+    observeEvent(dataRev(), {
+      updateSliderInput(session, "round", min = 1, max = n_rounds, value = n_rounds)
+    }, ignoreInit = TRUE)
 
     # Tag every message with whichever topics its content matches.
     tagged <- reactive({

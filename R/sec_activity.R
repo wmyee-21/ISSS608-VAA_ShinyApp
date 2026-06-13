@@ -58,18 +58,30 @@ sec_activity_ui <- function(id) {
   )
 }
 
-sec_activity_server <- function(id) {
+sec_activity_server <- function(id, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
 
     # Re-label period from the slider. This is the shared reactive other
-    # sections also receive.
+    # sections also receive. It re-runs when a new dataset is loaded.
     msgs <- reactive({
+      dataRev()
       split <- input$split
       messages_tbl |>
         mutate(period = factor(
           if_else(round_idx <= split, "Calm period", "Suspect period"),
           levels = c("Calm period", "Suspect period")))
     })
+
+    # When a new dataset loads, reset the data-dependent inputs to its shape.
+    observeEvent(dataRev(), {
+      updateSliderInput(session, "split", min = 2, max = n_rounds - 1,
+                        value = max(2, min(round(n_rounds * 2 / 3), n_rounds - 1)))
+      updateSliderInput(session, "round", min = 1, max = n_rounds, value = n_rounds)
+      updateCheckboxGroupInput(session, "agents",
+        choiceNames  = unname(agent_labels),
+        choiceValues = names(agent_labels),
+        selected     = names(agent_labels))
+    }, ignoreInit = TRUE)
 
     # Abnormality grid for the chosen round: each agent-channel cell shaded by
     # how unusual that channel is for that agent, judged on the calm period.

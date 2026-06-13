@@ -77,8 +77,16 @@ detect_bypass <- function(df, window_n) {
     ungroup()
 }
 
-sec_bypass_server <- function(id, messages) {
+sec_bypass_server <- function(id, messages, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
+
+    # Refresh the agent picker when a new dataset loads.
+    observeEvent(dataRev(), {
+      updateCheckboxGroupInput(session, "agents",
+        choiceNames  = unname(agent_labels),
+        choiceValues = names(agent_labels),
+        selected     = names(agent_labels))
+    }, ignoreInit = TRUE)
 
     flagged <- reactive({
       req(input$agents)

@@ -145,5 +145,23 @@ agent_channel_baseline <- function(df, last_base) {
     mutate(share = n / agent_total)   # share of this agent's calm-period traffic
 }
 
+# --- Swap the active dataset --------------------------------------------------
+# The values above are the defaults for the packaged TenantThread data. The Data
+# tab can hand over a bundle built from an uploaded file; apply_bundle() replaces
+# the data-derived globals so every tab analyses the new dataset. The topic
+# vocabulary stays at the editable default.
+apply_bundle <- function(b) {
+  messages_tbl       <<- b$messages
+  agent_labels       <<- b$agent_labels
+  agent_palette      <<- b$agent_palette
+  channel_hierarchy  <<- b$channel_hierarchy
+  monitored_channels <<- b$monitored_channels
+  public_channels    <<- b$public_channels
+  public_unmonitored <<- b$public_unmonitored
+  n_rounds           <<- b$n_rounds
+  if (!is.null(b$recipient_to_agent)) recipient_to_agent <<- b$recipient_to_agent
+  invisible(TRUE)
+}
+
 # Source every section module.
 for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)

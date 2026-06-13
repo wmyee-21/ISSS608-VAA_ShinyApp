@@ -59,8 +59,14 @@ agent_edges <- function(df) {
 # Colours used to mark how a link changed between the two compared rounds.
 change_cols <- c(New = "#2F855A", Dropped = "#9B2C2C", Stayed = "#CBD5E0")
 
-sec_network_server <- function(id, messages, split = NULL) {
+sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
+
+    # Refresh the round-comparison slider when a new dataset loads.
+    observeEvent(dataRev(), {
+      updateSliderInput(session, "rounds", min = 1, max = n_rounds,
+                        value = c(max(1, round(n_rounds / 3)), n_rounds))
+    }, ignoreInit = TRUE)
 
     # The two chosen rounds, smaller first. NULL until the slider has rendered.
     cmp <- reactive({
@@ -104,6 +110,7 @@ sec_network_server <- function(id, messages, split = NULL) {
     # Channel reference table at the bottom of the sidebar. Surfaces the
     # accountability hierarchy that the bipartite view orders its channels by.
     output$channel_ref <- renderTable({
+      dataRev()
       channel_hierarchy |>
         transmute(Rank = rank, Channel = channel, Layer = layer,
                   Monitored = if_else(monitored, "Yes", "No"))
