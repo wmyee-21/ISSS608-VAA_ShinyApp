@@ -11,6 +11,11 @@
 #     choice of calm period
 #   - which agents start using channels they never used before (the abnormal bit)
 #   - which exact messages are out of character, at the strictness they choose
+#
+# ADDED: Anomaly marker strip below the round slider. Each mini-bar corresponds
+# to one round — red means anomalies were detected in that round, grey means
+# none. Hovering shows the count. This lets analysts spot which rounds to
+# investigate before clicking the slider.
 
 sec_activity_ui <- function(id) {
   ns <- NS(id)
@@ -31,6 +36,9 @@ sec_activity_ui <- function(id) {
       sliderInput(ns("round"), "Round to inspect", min = 1, max = n_rounds,
                   value = n_rounds, step = 1, animate =
                     animationOptions(interval = 900)),
+      # Anomaly marker strip — sits directly below the round slider so the
+      # analyst can see at a glance which rounds had unusual activity.
+      uiOutput(ns("round_markers")),
       hr(),
       sliderInput(ns("strict"), "How unusual before we flag a message",
                   min = 1, max = 20, value = 5, step = 1, post = "%"),
@@ -58,56 +66,118 @@ sec_activity_ui <- function(id) {
   )
 }
 
-sec_activity_server <- function(id) {
+sec_activity_server <- function(id, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
-
+    
     # Re-label period from the slider. This is the shared reactive other
-    # sections also receive.
+    # sections also receive. It re-runs when a new dataset is loaded.
     msgs <- reactive({
+      dataRev()
       split <- input$split
       messages_tbl |>
         mutate(period = factor(
           if_else(round_idx <= split, "Calm period", "Suspect period"),
           levels = c("Calm period", "Suspect period")))
     })
-
+    
+    # When a new dataset loads, reset the data-dependent inputs to its shape.
+    observeEvent(dataRev(), {
+      updateSliderInput(session, "split", min = 2, max = n_rounds - 1,
+                        value = max(2, min(round(n_rounds * 2 / 3), n_rounds - 1)))
+      updateSliderInput(session, "round", min = 1, max = n_rounds, value = n_rounds)
+      updateCheckboxGroupInput(session, "agents",
+                               choiceNames  = unname(agent_labels),
+                               choiceValues = names(agent_labels),
+                               selected     = names(agent_labels))
+    }, ignoreInit = TRUE)
+    
+    # Flagged-message helper — defined early so round_markers can use it.
+    score <- function(df, last_base, strict) {
+      sh <- agent_channel_baseline(df, last_base) |> select(agent_id, channel, share)
+      df |>
+        left_join(sh, by = c("agent_id", "channel")) |>
+        mutate(share = replace_na(share, 0), flagged = share < strict / 100)
+    }
+    
+    # Anomaly marker strip rendered below the round slider.
+    # Each mini-bar = one round. Darker red = more unusual messages that round.
+    output$round_markers <- renderUI({
+      req(input$split, input$strict)
+      
+      flagged_per_round <- score(msgs(), input$split, input$strict) |>
+        group_by(round_idx) |>
+        summarise(flagged = sum(flagged), .groups = "drop")
+      
+      max_f <- max(flagged_per_round$flagged, 1)
+      
+      bars <- lapply(1:n_rounds, function(r) {
+        f <- flagged_per_round$flagged[flagged_per_round$round_idx == r]
+        f <- if (length(f) == 0) 0 else f
+        intensity <- f / max_f
+        bg <- if (f == 0) "#E2E8F0" else
+          sprintf("rgba(155,44,44,%.2f)", 0.25 + intensity * 0.75)
+        tags$div(
+          style = paste0(
+            "display:inline-block;",
+            "width:calc(", round(100 / n_rounds, 2), "% - 2px);",
+            "height:10px;",
+            "background:", bg, ";",
+            "border-radius:2px;",
+            "margin:0 1px;",
+            "cursor:pointer;"
+          ),
+          title = paste0("Round ", r, ": ", f, " unusual message", if (f != 1) "s" else "")
+        )
+      })
+      
+      tags$div(
+        tags$p(
+          style = "font-size:0.72em;color:#718096;margin:6px 0 3px 0;",
+          "⚠️ Anomaly guide — hover a bar to see the count:"
+        ),
+        tags$div(
+          style = "display:flex; width:100%; margin-bottom:2px;",
+          bars
+        ),
+        tags$div(
+          style = "display:flex; justify-content:space-between; font-size:0.65em; color:#A0AEC0;",
+          tags$span("Round 1"),
+          tags$span(paste0("Round ", n_rounds))
+        )
+      )
+    })
+    
     # Abnormality grid for the chosen round: each agent-channel cell shaded by
     # how unusual that channel is for that agent, judged on the calm period.
     output$abnormal <- renderGirafe({
       req(input$agents)
-
-      # Fixed axes: every selected agent and every channel is always present, in a
-      # stable order, so the grid never reshapes between rounds. Only the cell
-      # colour and count change, which makes the round-to-round change easy to
-      # track. Empty cells (no message that round) stay blank.
+      
       sel_agents   <- intersect(names(agent_labels), input$agents)
       all_channels <- channel_hierarchy$channel
-
+      
       base_share <- agent_channel_baseline(msgs(), input$split) |>
         transmute(agent_id = as.character(agent_id),
                   channel  = as.character(channel), share)
-
+      
       counts <- msgs() |>
         filter(round_idx == input$round, agent_id %in% sel_agents) |>
         count(agent_id, channel, name = "msgs") |>
         mutate(agent_id = as.character(agent_id),
                channel  = as.character(channel))
-
+      
       this_round <- tidyr::expand_grid(agent_id = sel_agents,
                                        channel  = all_channels) |>
         left_join(counts,     by = c("agent_id", "channel")) |>
         left_join(base_share, by = c("agent_id", "channel")) |>
         mutate(msgs  = replace_na(msgs, 0L),
                share = replace_na(share, 0),
-               # unusualness: 1 when the agent never used this channel in calm.
-               # Only colour cells with activity this round; blanks stay neutral.
                unusual  = 1 - share,
                fill_val = if_else(msgs > 0, unusual, NA_real_),
                tip = paste0(agent_labels[agent_id], " on ", channel,
                             ": ", msgs, " msgs this round. ",
                             scales::percent(share, accuracy = 1),
                             " of their baseline-period messages were here."))
-
+      
       ggp <- ggplot(this_round,
                     aes(x = channel, y = agent_id, fill = fill_val)) +
         geom_tile_interactive(aes(tooltip = tip, data_id = agent_id),
@@ -125,15 +195,7 @@ sec_activity_server <- function(id) {
               panel.grid = element_blank())
       girafe(ggobj = ggp, width_svg = 6.5, height_svg = 4)
     })
-
-    # Flagged-message timeline plus a robustness note comparing two calm periods.
-    score <- function(df, last_base, strict) {
-      sh <- agent_channel_baseline(df, last_base) |> select(agent_id, channel, share)
-      df |>
-        left_join(sh, by = c("agent_id", "channel")) |>
-        mutate(share = replace_na(share, 0), flagged = share < strict / 100)
-    }
-
+    
     output$flagged <- renderGirafe({
       df <- score(msgs(), input$split, input$strict) |>
         group_by(round_idx) |>
@@ -149,13 +211,13 @@ sec_activity_server <- function(id) {
         theme(panel.grid.minor = element_blank())
       girafe(ggobj = ggp, width_svg = 5, height_svg = 2.2)
     })
-
+    
     output$robust <- renderUI({
       strict <- input$strict
       wide   <- score(msgs(), input$split, strict)
       narrow <- score(msgs(), max(13, input$split - 7), strict)
       sus <- input$split + 1
-      w <- sum(wide$flagged   & wide$round_idx   >= sus)
+      w  <- sum(wide$flagged   & wide$round_idx   >= sus)
       nn <- sum(narrow$flagged & narrow$round_idx >= sus)
       HTML(paste0(
         "<p style='margin-top:8px'>Unusual messages in the suspect period: <b>",
@@ -167,9 +229,7 @@ sec_activity_server <- function(id) {
           "The two differ, so the finding is somewhat sensitive to where the line is drawn.",
         "</p>"))
     })
-
-    # Ranks agents by how many of their suspect-period messages were flagged as
-    # unusual, answering Objective 1's "which agents drifted and how far".
+    
     output$drifters <- renderUI({
       sus <- input$split + 1
       df <- score(msgs(), input$split, input$strict) |>
@@ -180,12 +240,12 @@ sec_activity_server <- function(id) {
                name = agent_labels[as.character(agent_id)]) |>
         arrange(desc(unusual)) |>
         slice_head(n = 5)
-
+      
       if (nrow(df) == 0 || sum(df$unusual) == 0) {
         return(HTML("<p style='margin-top:4px;color:#718096'>",
                     "No drifters at the current strictness setting.</p>"))
       }
-
+      
       rows <- paste0(
         "<li><b>", df$name, "</b> - ", df$unusual, " unusual messages (",
         scales::percent(df$pct, accuracy = 1), " of their suspect-period traffic)</li>",
@@ -193,8 +253,7 @@ sec_activity_server <- function(id) {
       HTML(paste0("<ol style='margin-top:6px;padding-left:20px'>",
                   rows, "</ol>"))
     })
-
-    # Output stats box: headline numbers plus what the tab means.
+    
     output$summary <- renderUI({
       sus <- input$split + 1
       df  <- score(msgs(), input$split, input$strict) |> filter(round_idx >= sus)
@@ -211,7 +270,7 @@ sec_activity_server <- function(id) {
         "rarely touched during the calm period. A cluster of these after the baseline points to an ",
         "agent breaking its own pattern, which is the first signal worth investigating.</p>"))
     })
-
+    
     # Public API for the other sections.
     list(messages = msgs, split = reactive(input$split))
   })
