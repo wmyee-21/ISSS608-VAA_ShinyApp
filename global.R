@@ -40,16 +40,9 @@ messages_tbl <- readr::read_csv(
   )
 )
 
-rounds_tbl <- readr::read_csv(
-  "data/rounds_clean.csv",
-  col_types = readr::cols(
-    round_idx      = readr::col_integer(),
-    round_hour_dt  = readr::col_datetime(),
-    n_messages     = readr::col_integer(),
-    n_participants = readr::col_integer(),
-    .default       = readr::col_character()
-  )
-)
+# Note: rounds_clean.csv is not loaded. No tab uses the round-narrative table, so
+# the app runs from the message log alone. Add it back here if a future tab needs
+# the event_headline / event_narrative text.
 
 # --- Fixed lookups (report Section 4.3) --------------------------------------
 agent_labels <- c(
@@ -143,6 +136,24 @@ agent_channel_baseline <- function(df, last_base) {
     count(agent_id, channel, name = "n") |>
     left_join(total_by_agent, by = "agent_id") |>
     mutate(share = n / agent_total)   # share of this agent's calm-period traffic
+}
+
+# --- Swap the active dataset --------------------------------------------------
+# The values above are the defaults for the packaged TenantThread data. The Data
+# tab can hand over a bundle built from an uploaded file; apply_bundle() replaces
+# the data-derived globals so every tab analyses the new dataset. The topic
+# vocabulary stays at the editable default.
+apply_bundle <- function(b) {
+  messages_tbl       <<- b$messages
+  agent_labels       <<- b$agent_labels
+  agent_palette      <<- b$agent_palette
+  channel_hierarchy  <<- b$channel_hierarchy
+  monitored_channels <<- b$monitored_channels
+  public_channels    <<- b$public_channels
+  public_unmonitored <<- b$public_unmonitored
+  n_rounds           <<- b$n_rounds
+  if (!is.null(b$recipient_to_agent)) recipient_to_agent <<- b$recipient_to_agent
+  invisible(TRUE)
 }
 
 # Source every section module.

@@ -76,23 +76,41 @@ ui <- page_navbar(
   title = "TenantThread Breach Explorer",
   theme = app_theme,
   fillable = FALSE,
+  nav_panel("Data",                   sec_upload_ui("upload")),
   nav_panel("Activity & abnormality", sec_activity_ui("activity")),
   nav_panel("The bypass",             sec_bypass_ui("bypass")),
   nav_panel("Network",                sec_network_ui("network")),
   nav_panel("Topics & evidence",      sec_topics_ui("topics")),
   nav_spacer(),
   nav_item(tags$span(style = "color:#fbeef4;font-size:0.85em;",
-                     "VAST 2026 MC1 · set the calm period on the Activity tab"))
+                     icon("table"), " Dataset: ",
+                     tags$b(textOutput("dataset_name", inline = TRUE))))
 )
 
 server <- function(input, output, session) {
+  # The app opens on the packaged TenantThread data (loaded in global.R). When the
+  # Data tab confirms an uploaded file, apply_bundle() swaps the data-derived
+  # globals and dataRev() bumps so every tab recomputes against the new dataset.
+  rv     <- reactiveValues(rev = 0L, name = "messages_clean.csv")
+  bundle <- sec_upload_server("upload")
+  observeEvent(bundle(), {
+    req(bundle())
+    apply_bundle(bundle())
+    if (!is.null(bundle()$file_name)) rv$name <- bundle()$file_name
+    rv$rev <- rv$rev + 1L
+  })
+  dataRev <- reactive(rv$rev)
+
+  # Dataset indicator in the navbar.
+  output$dataset_name <- renderText(rv$name)
+
   # Section A runs first and produces the shared reactives.
-  act <- sec_activity_server("activity")
+  act <- sec_activity_server("activity", dataRev = dataRev)
 
   # Pass them into the other sections.
-  sec_bypass_server ("bypass",  messages = act$messages)
-  sec_network_server("network", messages = act$messages, split = act$split)
-  sec_topics_server ("topics",  messages = act$messages)
+  sec_bypass_server ("bypass",  messages = act$messages, dataRev = dataRev)
+  sec_network_server("network", messages = act$messages, split = act$split, dataRev = dataRev)
+  sec_topics_server ("topics",  messages = act$messages, dataRev = dataRev)
 }
 
 shinyApp(ui, server)

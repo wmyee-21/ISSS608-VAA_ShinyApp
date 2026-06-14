@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# shinyapps.io deployment metadata
+rsconnect/

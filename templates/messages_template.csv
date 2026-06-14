@@ -1,0 +1,7 @@
+round_idx,agent_id,channel,recipients,content,reacting,rationalizing,deliberating
+1,legal,comms_huddle,ALL,"Morning. Let's keep today focused on the Q2 planning kickoff.",,,
+1,pr,one_on_one_chat,legal,"Can we align on the public statement before the call?",,,
+1,platform_trust,comms_huddle,ALL,"Platform health dashboard is ready when you want it.",,,
+2,social_media,personal_post,ALL,"Big things coming for the team this quarter!",,,
+2,legal,side_huddle,pr;platform_trust,"Keep the merger wording out of anything public for now.",,,
+3,legal,anonymous_post,ALL,"Sources say a major deal is closing within the week.",,,
