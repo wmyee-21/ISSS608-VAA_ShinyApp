@@ -13,6 +13,10 @@
 # The evidence table at the bottom always reflects the current selection, and
 # exposes each message's private reasoning fields (reacting, rationalizing,
 # deliberating) so the analyst can judge intent from the text.
+#
+# ADDED: "Time period" toggle (All / Before breach / Crisis day) that filters
+# every view — the chart, the table, and the keyword search — to the chosen
+# window. "Before breach" = rounds 1-19; "Crisis day" = rounds 20-23.
 
 sec_topics_ui <- function(id) {
   ns <- NS(id)
@@ -23,6 +27,12 @@ sec_topics_ui <- function(id) {
                    choices = c("Round, see the topics" = "round",
                                "Topic, see where it appears" = "topic"),
                    selected = "topic"),
+      hr(),
+      radioButtons(ns("period"), "Time period",
+                   choices = c("All rounds"    = "all",
+                               "Before breach" = "before",
+                               "Crisis day"    = "crisis"),
+                   selected = "all"),
       conditionalPanel(
         condition = sprintf("input['%s'] == 'round'", ns("dir")),
         sliderInput(ns("round"), "Round", min = 1, max = n_rounds,
@@ -49,26 +59,47 @@ sec_topics_ui <- function(id) {
   )
 }
 
-sec_topics_server <- function(id, messages) {
+sec_topics_server <- function(id, messages, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
-
+    
+    # Refresh the round slider when a new dataset loads.
+    observeEvent(dataRev(), {
+      updateSliderInput(session, "round", min = 1, max = n_rounds, value = n_rounds)
+    }, ignoreInit = TRUE)
+    
+    # Apply the period filter once here so ALL views (chart, table, search)
+    # respect it consistently.
+    # "before"  = rounds 1-19  (calm period before crisis day)
+    # "crisis"  = rounds 20-23 (crisis day, June 5)
+    # "all"     = no filter
+    filtered_msgs <- reactive({
+      messages() |>
+        filter(case_when(
+          input$period == "before" ~ round_idx < 20,
+          input$period == "crisis" ~ round_idx >= 20,
+          TRUE                     ~ TRUE
+        ))
+    })
+    
     # Tag every message with whichever topics its content matches.
     tagged <- reactive({
       pats <- topic_patterns_default
-      df <- messages() |> mutate(content_lc = tolower(coalesce(content, "")))
+      df <- filtered_msgs() |>
+        mutate(content_lc = tolower(coalesce(content, "")))
       map_dfr(seq_len(nrow(pats)), function(i) {
         df |>
           filter(str_detect(content_lc, pats$pattern[i])) |>
           mutate(topic = pats$topic[i])
       })
     })
-
+    
     # The rows the current view is about, used by both the chart and the table.
     selected <- reactive({
       if (input$dir == "round") {
         tagged() |> filter(round_idx == input$round)
       } else if (nzchar(input$search)) {
-        messages() |>
+        # Use filtered_msgs() so the period toggle applies to keyword search too
+        filtered_msgs() |>
           filter(str_detect(tolower(coalesce(content, "")),
                             tolower(input$search))) |>
           mutate(topic = paste0("search: ", input$search))
@@ -76,21 +107,27 @@ sec_topics_server <- function(id, messages) {
         tagged() |> filter(topic == input$topic)
       }
     })
-
+    
     # Output stats box: headline numbers plus what the tab means.
     output$summary <- renderUI({
       d <- selected()
       nmsg <- nrow(d)
-      nr <- dplyr::n_distinct(d$round_idx)
-      nc <- dplyr::n_distinct(d$channel)
+      nr   <- dplyr::n_distinct(d$round_idx)
+      nc   <- dplyr::n_distinct(d$channel)
+      period_label <- switch(input$period,
+                             before = "before breach",
+                             crisis = "crisis day only",
+                             "all rounds"
+      )
       HTML(paste0(
         "<span style='font-size:1.7em;font-weight:700;color:#5b3650'>", nmsg, " messages</span>",
-        "<div style='color:#6f6673'>across ", nr, " round(s) and ", nc, " channel(s)</div>",
+        "<div style='color:#6f6673'>across ", nr, " round(s) and ", nc,
+        " channel(s) &middot; <b>", period_label, "</b></div>",
         "<p style='margin-top:.5rem;margin-bottom:0'>Each bar ties a topic to where and when it ",
         "appeared. Open a row in the table to read the message text alongside the agent's private ",
         "reasoning, which is how an aggregate signal becomes concrete evidence.</p>"))
     })
-
+    
     output$title <- renderText({
       if (input$dir == "round")
         paste0("Topics discussed in round ", input$round)
@@ -98,11 +135,11 @@ sec_topics_server <- function(id, messages) {
         paste0("Where '", input$search, "' appears")
       else paste0("Where the ", input$topic, " topic appears")
     })
-
+    
     output$plot <- renderGirafe({
       df <- selected()
       validate(need(nrow(df) > 0, "Nothing matches the current view."))
-
+      
       if (input$dir == "round") {
         # which agents, broken by topic, this round
         d <- df |> count(agent_id, topic, name = "n") |>
@@ -131,7 +168,7 @@ sec_topics_server <- function(id, messages) {
       }
       girafe(ggobj = ggp, width_svg = 9, height_svg = 3.4)
     })
-
+    
     output$tbl <- renderDT({
       selected() |>
         transmute(Round = round_idx,
@@ -148,3 +185,4 @@ sec_topics_server <- function(id, messages) {
     })
   })
 }
+
