@@ -10,11 +10,13 @@ source("global.R")
 # Wiring: Section A returns a reactive list (the chosen calm-period split and the
 # re-labelled messages). That list is passed into every other section, so moving
 # the calm-period slider on the first tab recomputes the others together.
+#
+# ADDED: Cross-tab linking. When a bar is clicked in the Bypass tab, the app
+# automatically jumps to the Network tab and sets the round slider to compare
+# that round with the one before it, so the analyst can see the network change
+# at the exact moment of the bypass.
 
 # --- Theme -------------------------------------------------------------------
-# Matches the project website (theme.scss): plum primary, rose accents, blush
-# surfaces, Playfair Display headings over a Nunito Sans body. bs_add_rules layers
-# the navbar, card, sidebar and input styling that mirrors the site.
 app_theme <- bs_theme(
   version       = 5,
   bg            = "#fffdfe",
@@ -72,7 +74,9 @@ app_theme <- bs_theme(
         background:#7d4a67 !important; color:#fff !important; border-radius:.3rem; }
   ")
 
+# id = "main_nav" is required so nav_select() can switch tabs programmatically.
 ui <- page_navbar(
+  id    = "main_nav",
   title = "TenantThread Breach Explorer",
   theme = app_theme,
   fillable = FALSE,
@@ -88,9 +92,6 @@ ui <- page_navbar(
 )
 
 server <- function(input, output, session) {
-  # The app opens on the packaged TenantThread data (loaded in global.R). When the
-  # Data tab confirms an uploaded file, apply_bundle() swaps the data-derived
-  # globals and dataRev() bumps so every tab recomputes against the new dataset.
   rv     <- reactiveValues(rev = 0L, name = "messages_clean.csv")
   bundle <- sec_upload_server("upload")
   observeEvent(bundle(), {
@@ -100,17 +101,28 @@ server <- function(input, output, session) {
     rv$rev <- rv$rev + 1L
   })
   dataRev <- reactive(rv$rev)
-
-  # Dataset indicator in the navbar.
+  
   output$dataset_name <- renderText(rv$name)
-
+  
   # Section A runs first and produces the shared reactives.
   act <- sec_activity_server("activity", dataRev = dataRev)
-
-  # Pass them into the other sections.
-  sec_bypass_server ("bypass",  messages = act$messages, dataRev = dataRev)
-  sec_network_server("network", messages = act$messages, split = act$split, dataRev = dataRev)
-  sec_topics_server ("topics",  messages = act$messages, dataRev = dataRev)
+  
+  # Bypass now returns the selected round so we can navigate to Network.
+  byp <- sec_bypass_server("bypass", messages = act$messages, dataRev = dataRev)
+  
+  # When a bypass bar is clicked, jump to the Network tab.
+  # The Network server will update its own round slider via jump_round.
+  observeEvent(byp$selected_round(), {
+    r <- byp$selected_round()
+    req(!is.null(r) && any(nzchar(r)))
+    nav_select("main_nav", "Network", session = session)
+  }, ignoreNULL = TRUE, ignoreInit = TRUE)
+  
+  # Pass jump_round into Network so it can update its slider too.
+  sec_network_server("network", messages = act$messages, split = act$split,
+                     dataRev = dataRev, jump_round = byp$selected_round)
+  
+  sec_topics_server("topics", messages = act$messages, dataRev = dataRev)
 }
 
 shinyApp(ui, server)

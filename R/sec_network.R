@@ -12,6 +12,11 @@
 # the right handle the later round. Both views then draw the two rounds next to
 # each other, and every link is coloured by how it differs between them: green is
 # new in the later round, red dropped out before it, grey is present in both.
+#
+# ADDED: jump_round parameter. When a round is clicked in the Bypass tab,
+# app.R passes that round here and the slider updates automatically to compare
+# that round with the one before it, so the analyst can see the network change
+# at the exact moment of the bypass without manually finding the round.
 
 sec_network_ui <- function(id) {
   ns <- NS(id)
@@ -36,16 +41,11 @@ sec_network_ui <- function(id) {
       htmlOutput(ns("summary"))
     ),
     card(card_header(textOutput(ns("title"))),
-         # Summary line that names the biggest connectivity loser between the two
-         # selected rounds. Only populated for the graph view.
          htmlOutput(ns("diff_summary")),
          girafeOutput(ns("plot"), height = "480px"))
   )
 }
 
-# Build agent-to-agent directed edges from recipients for a set of rows.
-# Recipients are short names (legal), so map them to full agent IDs (legal_agent)
-# via recipient_to_agent before matching, otherwise no edges connect to nodes.
 agent_edges <- function(df) {
   df |>
     filter(!is.na(recipients_csv), recipients_csv != "", recipients_csv != "ALL") |>
@@ -56,26 +56,34 @@ agent_edges <- function(df) {
     count(from, to, name = "weight")
 }
 
-# Colours used to mark how a link changed between the two compared rounds.
 change_cols <- c(New = "#2F855A", Dropped = "#9B2C2C", Stayed = "#CBD5E0")
 
-sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)) {
+sec_network_server <- function(id, messages, split = NULL,
+                               dataRev = reactive(0),
+                               jump_round = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
-
+    
     # Refresh the round-comparison slider when a new dataset loads.
     observeEvent(dataRev(), {
       updateSliderInput(session, "rounds", min = 1, max = n_rounds,
                         value = c(max(1, round(n_rounds / 3)), n_rounds))
     }, ignoreInit = TRUE)
-
-    # The two chosen rounds, smaller first. NULL until the slider has rendered.
+    
+    # When a bypass bar is clicked, jump the slider to compare that round
+    # with the one immediately before it so the network change is visible.
+    observeEvent(jump_round(), {
+      r <- suppressWarnings(as.integer(jump_round()))
+      req(!is.na(r), r >= 1)
+      updateSliderInput(session, "rounds",
+                        value = c(max(1L, r - 1L), r))
+    }, ignoreNULL = TRUE, ignoreInit = TRUE)
+    
     cmp <- reactive({
       rng <- input$rounds
       req(length(rng) == 2)
       list(r1 = min(rng), r2 = max(rng))
     })
-
-    # Output stats box: headline numbers plus what the tab means.
+    
     output$summary <- renderUI({
       rr <- cmp(); r1 <- rr$r1; r2 <- rr$r2
       e1 <- agent_edges(messages() |> filter(round_idx == r1))
@@ -90,7 +98,7 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
         "dropped, grey unchanged. An agent shedding links is moving from the centre of the ",
         "conversation to its edge, often as oversight tightens.</p>"))
     })
-
+    
     output$title <- renderText({
       rng <- input$rounds
       if (length(rng) != 2) return("Comparing two rounds")
@@ -99,39 +107,35 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
              graph = paste0("Who talked to whom: round ", r1, " vs round ", r2),
              bip   = paste0("Channels used: round ", r1, " vs round ", r2))
     })
-
+    
     output$note <- renderUI({
       txt <- switch(input$view,
-        graph = "Two graphs, one per selected round. Each arrow is one agent messaging another, and node size is how connected the agent is. Green arrows are new in the later round, red arrows dropped out before it, grey arrows are in both.",
-        bip   = "Two graphs, one per selected round. A line means the agent used that channel that round. Green lines are new in the later round, red lines dropped out before it, grey lines are in both. Watch for agents reaching the red public channels at the bottom.")
+                    graph = "Two graphs, one per selected round. Each arrow is one agent messaging another, and node size is how connected the agent is. Green arrows are new in the later round, red arrows dropped out before it, grey arrows are in both.",
+                    bip   = "Two graphs, one per selected round. A line means the agent used that channel that round. Green lines are new in the later round, red lines dropped out before it, grey lines are in both. Watch for agents reaching the red public channels at the bottom.")
       HTML(paste0("<p style='font-size:0.9em;color:#4A5568'>", txt, "</p>"))
     })
-
-    # Channel reference table at the bottom of the sidebar. Surfaces the
-    # accountability hierarchy that the bipartite view orders its channels by.
+    
     output$channel_ref <- renderTable({
       dataRev()
       channel_hierarchy |>
         transmute(Rank = rank, Channel = channel, Layer = layer,
                   Monitored = if_else(monitored, "Yes", "No"))
     }, striped = TRUE, spacing = "xs", width = "100%")
-
-    # One-line summary above the graph naming the agent that lost the most links
-    # between the two selected rounds. Renders nothing for the bipartite view.
+    
     output$diff_summary <- renderUI({
       if (input$view != "graph") return(NULL)
       rr <- cmp(); r1 <- rr$r1; r2 <- rr$r2
       if (r1 == r2) return(NULL)
-
+      
       e1 <- agent_edges(messages() |> filter(round_idx == r1))
       e2 <- agent_edges(messages() |> filter(round_idx == r2))
       dropped <- anti_join(e1, e2, by = c("from", "to"))
       if (nrow(dropped) == 0) {
         return(HTML(paste0("<p style='margin:6px 0;color:#4A5568'>",
-                    "No links present in round ", r1,
-                    " dropped out by round ", r2, ".</p>")))
+                           "No links present in round ", r1,
+                           " dropped out by round ", r2, ".</p>")))
       }
-
+      
       per_agent <- bind_rows(
         dropped |> count(agent = from, name = "out"),
         dropped |> count(agent = to,   name = "in_")
@@ -141,7 +145,7 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
                   in_ = sum(in_, na.rm = TRUE),
                   total = out + in_, .groups = "drop") |>
         arrange(desc(total))
-
+      
       top <- per_agent |> slice_head(n = 1)
       HTML(paste0(
         "<p style='margin:6px 0 10px 0;color:#1A202C'><b>",
@@ -151,26 +155,24 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
         "between round ", r1, " and round ", r2,
         ", the largest drop of any agent.</p>"))
     })
-
+    
     output$plot <- renderGirafe({
       rr <- cmp(); r1 <- rr$r1; r2 <- rr$r2
       validate(need(r1 != r2, "Move the two slider handles to different rounds."))
       lab1 <- paste0("Round ", r1); lab2 <- paste0("Round ", r2)
       panel_levels <- c(lab1, lab2)
-
+      
       if (input$view == "graph") {
         e1 <- agent_edges(messages() |> filter(round_idx == r1))
         e2 <- agent_edges(messages() |> filter(round_idx == r2))
         validate(need(nrow(e1) + nrow(e2) > 0,
                       "No agent-to-agent messages in either selected round."))
         k1 <- paste(e1$from, e1$to); k2 <- paste(e2$from, e2$to)
-
-        # Explicit circle layout, reused in both panels.
+        
         ag <- names(agent_labels)
         ang <- seq(0, 2 * pi, length.out = length(ag) + 1)[seq_along(ag)]
         pos <- tibble(name = ag, x = cos(ang), y = sin(ang))
-
-        # Per-round degree (total links touching each node) for sizing.
+        
         deg_of <- function(e) {
           tibble(name = ag) |>
             left_join(
@@ -184,7 +186,7 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
           pos |> left_join(deg_of(e1), by = "name") |> mutate(panel = lab1),
           pos |> left_join(deg_of(e2), by = "name") |> mutate(panel = lab2))
         nodes$panel <- factor(nodes$panel, levels = panel_levels)
-
+        
         build <- function(e, status_fun, lab) {
           if (nrow(e) == 0) return(NULL)
           e |>
@@ -198,7 +200,7 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
           build(e1, function(k) if_else(k %in% k2, "Stayed", "Dropped"), lab1),
           build(e2, function(k) if_else(k %in% k1, "Stayed", "New"),     lab2))
         seg$panel <- factor(seg$panel, levels = panel_levels)
-
+        
         ggp <- ggplot() +
           geom_segment_interactive(
             data = seg,
@@ -224,7 +226,7 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
                 strip.text = element_text(size = 12, face = "bold"))
         return(girafe(ggobj = ggp, width_svg = 9, height_svg = 5))
       }
-
+      
       # bipartite view
       used_of <- function(rr_idx) {
         messages() |>
@@ -237,14 +239,14 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
       validate(need(nrow(u1) + nrow(u2) > 0,
                     "No messages in either selected round."))
       p1 <- paste(u1$agent, u1$chan); p2 <- paste(u2$agent, u2$chan)
-
+      
       ag_names <- names(agent_labels)
       ch_names <- channel_hierarchy$channel
       ag_pos <- tibble(agent = ag_names, ax = 0, ay = seq_along(ag_names))
       ch_pos <- tibble(chan = ch_names, cx = 1,
                        cy = seq_along(ch_names) *
                          (length(ag_names) / length(ch_names)))
-
+      
       build_b <- function(u, status_fun, lab) {
         if (nrow(u) == 0) return(NULL)
         u |>
@@ -258,14 +260,14 @@ sec_network_server <- function(id, messages, split = NULL, dataRev = reactive(0)
         build_b(u1, function(k) if_else(k %in% p2, "Stayed", "Dropped"), lab1),
         build_b(u2, function(k) if_else(k %in% p1, "Stayed", "New"),     lab2))
       seg$panel <- factor(seg$panel, levels = panel_levels)
-
+      
       ag_nodes <- bind_rows(ag_pos |> mutate(panel = lab1),
                             ag_pos |> mutate(panel = lab2))
       ch_nodes <- bind_rows(ch_pos |> mutate(panel = lab1),
                             ch_pos |> mutate(panel = lab2))
       ag_nodes$panel <- factor(ag_nodes$panel, levels = panel_levels)
       ch_nodes$panel <- factor(ch_nodes$panel, levels = panel_levels)
-
+      
       ggp <- ggplot() +
         geom_segment_interactive(
           data = seg,

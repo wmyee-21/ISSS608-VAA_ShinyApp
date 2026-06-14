@@ -14,6 +14,9 @@
 #
 # The recent-window slider sets how many rounds before the post to look back.
 # The actual post text is one click away in the table.
+#
+# ADDED: Returns selected_round so app.R can jump to the Network tab and
+# pre-set the round slider to the clicked round for cross-tab investigation.
 
 sec_bypass_ui <- function(id) {
   ns <- NS(id)
@@ -31,7 +34,10 @@ sec_bypass_ui <- function(id) {
                "watched channel in the post's own round or the selected number ",
                "of rounds before it. If no such post accounts for the bypass it ",
                "is marked a stronger bypass; if one does, it is likely explained. ",
-               "Set to 0 to check only the post's own round.")
+               "Set to 0 to check only the post's own round."),
+      hr(),
+      helpText("💡 Click any bar to see that round's posts below — and jump ",
+               "to the Network tab to see how communication changed that round.")
     ),
     card(
       card_header("Reading this tab"),
@@ -54,24 +60,19 @@ sec_bypass_ui <- function(id) {
 
 # Classify each unmonitored public post for the given messages and window.
 detect_bypass <- function(df, window_n) {
-  # Rounds in which each agent touched a monitored channel.
   mon_rounds <- df |>
     filter(channel %in% monitored_channels) |>
     distinct(agent_id, round_idx) |>
     mutate(mon = TRUE)
-
+  
   posts <- df |> filter(channel %in% public_unmonitored)
-
-  # For each public post, did the agent leave any accountable trace on a
-  # monitored channel in the post's own round or within the preceding window_n
-  # rounds? If yes, a previous post accounts for the bypass and it is likely
-  # explained. If not, nothing accounts for it and it is a stronger bypass.
+  
   posts |>
     rowwise() |>
     mutate(
       accounted = any(mon_rounds$agent_id == agent_id &
-                      mon_rounds$round_idx >= (round_idx - window_n) &
-                      mon_rounds$round_idx <= round_idx),
+                        mon_rounds$round_idx >= (round_idx - window_n) &
+                        mon_rounds$round_idx <= round_idx),
       strength  = if_else(!accounted, "Stronger bypass", "Likely explained")
     ) |>
     ungroup()
@@ -79,22 +80,20 @@ detect_bypass <- function(df, window_n) {
 
 sec_bypass_server <- function(id, messages, dataRev = reactive(0)) {
   moduleServer(id, function(input, output, session) {
-
-    # Refresh the agent picker when a new dataset loads.
+    
     observeEvent(dataRev(), {
       updateCheckboxGroupInput(session, "agents",
-        choiceNames  = unname(agent_labels),
-        choiceValues = names(agent_labels),
-        selected     = names(agent_labels))
+                               choiceNames  = unname(agent_labels),
+                               choiceValues = names(agent_labels),
+                               selected     = names(agent_labels))
     }, ignoreInit = TRUE)
-
+    
     flagged <- reactive({
       req(input$agents)
       detect_bypass(messages(), input$window) |>
         filter(agent_id %in% input$agents)
     })
-
-    # Output stats box: headline numbers plus what the tab means.
+    
     output$summary <- renderUI({
       d <- flagged()
       strong <- sum(d$strength == "Stronger bypass")
@@ -108,19 +107,15 @@ sec_bypass_server <- function(id, messages, dataRev = reactive(0)) {
         "nothing accountable explains reaching the outside; <b>likely explained</b> means accountable ",
         "discussion sat close by.</p>"))
     })
-
+    
     output$plot <- renderGirafe({
       df <- flagged() |>
         mutate(agent = as.character(agent_id)) |>
         count(round_idx, agent, strength, name = "n") |>
         mutate(tip = paste0(agent_labels[agent], " — Round ", round_idx,
-                            ": ", n, " ", tolower(strength)))
+                            ": ", n, " ", tolower(strength),
+                            " — click to view in Network tab"))
       validate(need(nrow(df) > 0, "No bypass candidates for this selection."))
-      # Bars are coloured by agent so the distribution of bypass posts across the
-      # selected agents is visible. The stronger / likely-explained distinction is
-      # kept as bar opacity (solid = stronger) rather than as a second hue.
-      # data_id is the round, so clicking any part of a round's bar selects that
-      # whole round and filters the table below to its posts.
       ggp <- ggplot(df, aes(round_idx, n, fill = agent, alpha = strength)) +
         geom_col_interactive(aes(tooltip = tip, data_id = round_idx),
                              width = 0.8) +
@@ -138,11 +133,9 @@ sec_bypass_server <- function(id, messages, dataRev = reactive(0)) {
                opts_selection(type = "single", only_shiny = TRUE),
                opts_hover(css = "stroke:#1A202C;stroke-width:0.8px;cursor:pointer;")))
     })
-
+    
     output$tbl <- renderDT({
       d <- flagged()
-      # If a bar is selected, narrow the table to that round. Empty selection
-      # (no bar clicked, or a clicked bar clicked again) shows everything.
       sel <- input$plot_selected
       if (!is.null(sel) && any(nzchar(sel))) {
         d <- d |> filter(round_idx %in% as.integer(sel))
@@ -156,5 +149,8 @@ sec_bypass_server <- function(id, messages, dataRev = reactive(0)) {
         arrange(Round) |>
         datatable(rownames = FALSE, options = list(pageLength = 8, dom = "tip"))
     })
+    
+    # Return the selected round so app.R can navigate to the Network tab.
+    list(selected_round = reactive(input$plot_selected))
   })
 }
