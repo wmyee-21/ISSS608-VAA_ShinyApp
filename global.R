@@ -15,6 +15,10 @@ library(ggraph)       # network rendering in the ggplot grammar
 library(igraph)       # density and degree calculations
 library(scales)
 
+# Make every interactive plot fill its container width instead of the default
+# three-quarter width, which left a lot of blank space on wide screens.
+ggiraph::set_girafe_defaults(opts_sizing = ggiraph::opts_sizing(rescale = TRUE, width = 1))
+
 # --- Load cleaned data -------------------------------------------------------
 # Same three CSVs produced in report Section 4. Types are set so factors order
 # correctly on every axis and logicals stay logical.
