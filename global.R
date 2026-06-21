@@ -14,6 +14,7 @@ library(tidygraph)    # graph structures for the network section
 library(ggraph)       # network rendering in the ggplot grammar
 library(igraph)       # density and degree calculations
 library(scales)
+library(patchwork)    # align the Case Board timeline and heatmap as one figure
 
 # Make every interactive plot fill its container width instead of the default
 # three-quarter width, which left a lot of blank space on wide screens.

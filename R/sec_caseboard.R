@@ -42,10 +42,12 @@ sec_caseboard_ui <- function(id) {
       hr(),
 
       tags$div(class = "kicker", "Topic"),
-      selectInput(ns("topic"), "Topics to track (one or more)",
+      selectInput(ns("topic"), "Topics to track (blank = all)",
                   choices = topic_patterns_default$topic, selected = "Merger",
                   multiple = TRUE),
-      textInput(ns("search"), "Or search any word"),
+      textInput(ns("search"), "Or search words (comma-separated)"),
+      helpText("Leave topics blank to track all of them. A search overrides the ",
+               "dropdown; separate several words with commas."),
       sliderInput(ns("spike"), "Spike size (× baseline)",
                   min = 1, max = 5, value = 1, step = 0.5),
       helpText("Flag a round when mentions are this many times the baseline average."),
@@ -63,16 +65,11 @@ sec_caseboard_ui <- function(id) {
        hot cell to investigate that round in the matching tab.</p>"),
 
     card(
-      card_header("Choose the baseline · signals over time"),
-      girafeOutput(ns("timeline"), height = "450px"),
-      card_footer("Each strip is a signal that has a setting. Click any bar to ",
-                  "set the baseline; shaded rounds are the baseline period.")
-    ),
-    card(
       card_header(textOutput(ns("matrix_title"))),
-      girafeOutput(ns("matrix"), height = "330px"),
-      card_footer("Darker means more abnormal, judged within each signal. ",
-                  "Click a cell to investigate that round in detail.")
+      girafeOutput(ns("board"), height = "820px"),
+      card_footer("Top strips set the baseline — click a bar (shaded rounds are ",
+                  "the baseline period). Heatmap below — darker is more abnormal; ",
+                  "click a cell to investigate that round.")
     )
   )
 }
@@ -123,83 +120,10 @@ sec_caseboard_server <- function(id, settings, dataRev = reactive(0)) {
       paste0("Abnormality across the timeline · topic: ", tp$label)
     })
 
-    # ---- Baseline-selection timeline -----------------------------------------
-    # One strip per signal that has a setting, shown as raw per-round counts that
-    # do NOT depend on the baseline, so they are a fair guide for placing it.
-    output$timeline <- renderGirafe({
-      dataRev()
-      split <- settings$baseline_split %||% default_split()
-      tp <- resolve_topic_pattern(settings$topic, settings$search)
-      rl <- round_label_tbl(messages_tbl)
-      rds <- sort(unique(messages_tbl$round_idx))
+    # The signals-over-time strips and the abnormality heatmap are drawn as ONE
+    # figure (output$board) so they scale together and their round axes align.
 
-      s_drift <- "Unusual channel activity"
-      s_topic <- paste0("Mentions of ", tp$label)
-      s_net   <- "Active links"
-      sig_levels <- c(s_drift, s_topic, s_net)
-
-      drift <- score_activity(messages_tbl, split, settings$strict %||% 1) |>
-        dplyr::transmute(round_idx, value, signal = s_drift)
-      topic <- messages_tbl |>
-        dplyr::mutate(hit = stringr::str_detect(tolower(dplyr::coalesce(content, "")),
-                                                tolower(tp$pattern))) |>
-        dplyr::group_by(round_idx) |>
-        dplyr::summarise(value = sum(hit), .groups = "drop") |>
-        dplyr::mutate(signal = s_topic)
-      net <- dplyr::bind_rows(lapply(rds, function(r) {
-        e <- build_agent_edges(messages_tbl |> dplyr::filter(round_idx == r))
-        tibble::tibble(round_idx = r, value = nrow(e))
-      })) |> dplyr::mutate(signal = s_net)
-
-      d <- tidyr::expand_grid(round_idx = rds, signal = sig_levels) |>
-        dplyr::left_join(dplyr::bind_rows(drift, topic, net),
-                         by = c("round_idx", "signal")) |>
-        dplyr::left_join(rl, by = "round_idx") |>
-        dplyr::mutate(value = tidyr::replace_na(value, 0))
-      d$signal <- factor(d$signal, levels = sig_levels)
-      cap <- round_date_caption(messages_tbl)
-      cap_txt <- if (nzchar(cap)) paste0(cap, "  ·  hover a bar for its date") else ""
-
-      ggp <- ggplot(d, aes(round_idx, value, fill = signal)) +
-        annotate("rect", xmin = -Inf, xmax = split + 0.5, ymin = -Inf, ymax = Inf,
-                 fill = "#5b3650", alpha = 0.06) +
-        geom_col_interactive(
-          aes(tooltip = paste0(signal, " · round ", round_idx, " · ", lab, ": ",
-                               value, " · click to set baseline"),
-              data_id = round_idx), width = 0.85) +
-        geom_vline(xintercept = split + 0.5, linetype = "dashed", colour = "#7d4a67") +
-        facet_grid(signal ~ ., scales = "free_y", switch = "y") +
-        scale_fill_manual(values = setNames(c("#9B2C2C", "#7d4a67", "#c4708f"),
-                                            sig_levels), guide = "none") +
-        scale_x_continuous(breaks = rl$round_idx) +
-        labs(x = "Round", y = NULL, caption = cap_txt) +
-        theme_minimal(base_size = 11) +
-        theme(axis.text.x = element_text(size = 8, colour = "#6f6673"),
-              axis.title.x = element_text(size = 9, colour = "#6f6673"),
-              panel.grid.minor = element_blank(),
-              panel.spacing = unit(3, "pt"),
-              plot.margin = margin(2, 4, 2, 2),
-              plot.caption = element_text(size = 7.5, colour = "#8a7e88", hjust = 0),
-              strip.placement = "outside",
-              strip.text.y.left = element_text(angle = 0, face = "bold", size = 8.5,
-                                               colour = "#5b3650"))
-      girafe(ggobj = ggp, width_svg = 11, height_svg = 6.4,
-             options = list(
-               opts_selection(type = "single", only_shiny = TRUE),
-               opts_hover(css = "stroke:#5b3650;stroke-width:1px;cursor:pointer;")))
-    })
-
-    observeEvent(input$timeline_selected, {
-      sel <- input$timeline_selected
-      req(length(sel) == 1, nzchar(sel))
-      r <- suppressWarnings(as.integer(sel))
-      req(!is.na(r))
-      r <- max(2L, min(r, n_rounds - 1L))
-      settings$baseline_split <- r
-      updateSliderInput(session, "split", value = r)
-    }, ignoreInit = TRUE)
-
-    # ---- Status matrix -------------------------------------------------------
+    # ---- Status matrix data --------------------------------------------------
     matrix_data <- reactive({
       dataRev()
       req(settings$baseline_split, settings$strict)
@@ -235,41 +159,110 @@ sec_caseboard_server <- function(id, settings, dataRev = reactive(0)) {
                                   paste0(round(value))))))
     })
 
-    output$matrix <- renderGirafe({
-      full <- matrix_data()
+    # ---- Combined figure: signals over time (top) + heatmap (bottom) ---------
+    output$board <- renderGirafe({
+      split <- settings$baseline_split %||% default_split()
+      tp <- resolve_topic_pattern(settings$topic, settings$search)
       rl <- round_label_tbl(messages_tbl)
+      rds <- sort(unique(messages_tbl$round_idx))
+
+      # Top: per-round counts for each tunable signal.
+      s_drift <- "Number of unusual\nchannel activities"
+      s_net   <- "Number of active\nconnections"
+      s_topic <- "Count of topic\nmentions"
+      sig_levels <- c(s_drift, s_net, s_topic)
+      drift <- score_activity(messages_tbl, split, settings$strict %||% 1) |>
+        dplyr::transmute(round_idx, value, signal = s_drift)
+      topic <- messages_tbl |>
+        dplyr::mutate(hit = stringr::str_detect(tolower(dplyr::coalesce(content, "")),
+                                                tolower(tp$pattern))) |>
+        dplyr::group_by(round_idx) |>
+        dplyr::summarise(value = sum(hit), .groups = "drop") |>
+        dplyr::mutate(signal = s_topic)
+      net <- dplyr::bind_rows(lapply(rds, function(r) {
+        tibble::tibble(round_idx = r,
+                       value = nrow(build_agent_edges(messages_tbl |> dplyr::filter(round_idx == r))))
+      })) |> dplyr::mutate(signal = s_net)
+      dt <- tidyr::expand_grid(round_idx = rds, signal = sig_levels) |>
+        dplyr::left_join(dplyr::bind_rows(drift, topic, net), by = c("round_idx", "signal")) |>
+        dplyr::left_join(rl, by = "round_idx") |>
+        dplyr::mutate(value = tidyr::replace_na(value, 0))
+      dt$signal <- factor(dt$signal, levels = sig_levels)
+
+      gg_top <- ggplot(dt, aes(round_idx, value, fill = signal)) +
+        annotate("rect", xmin = -Inf, xmax = split + 0.5, ymin = -Inf, ymax = Inf,
+                 fill = "#5b3650", alpha = 0.06) +
+        geom_col_interactive(
+          aes(tooltip = paste0(signal, " · round ", round_idx, " · ", lab, ": ",
+                               value, " · click to set baseline"),
+              data_id = round_idx), width = 0.85) +
+        geom_vline(xintercept = split + 0.5, linetype = "dashed", colour = "#7d4a67") +
+        facet_grid(signal ~ ., scales = "free_y", switch = "y") +
+        scale_fill_manual(values = setNames(c("#9B2C2C", "#c4708f", "#7d4a67"),
+                                            sig_levels), guide = "none") +
+        scale_x_continuous(breaks = rl$round_idx, limits = c(0.5, n_rounds + 0.5),
+                           expand = expansion(0)) +
+        labs(x = NULL, y = NULL) +
+        theme_minimal(base_size = 11) +
+        theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+              axis.text.y = element_text(size = 7, colour = "#6f6673"),
+              axis.ticks.y = element_blank(),
+              panel.grid.minor = element_blank(), panel.spacing = unit(3, "pt"),
+              plot.margin = margin(2, 8, 0, 8),
+              strip.placement = "outside",
+              strip.text.y.left = element_text(angle = 0, face = "bold", size = 8.5,
+                                               colour = "#5b3650"))
+
+      # Bottom: abnormality heatmap.
+      full <- matrix_data()
       cap <- round_date_caption(messages_tbl)
-      cap_txt <- if (nzchar(cap)) paste0(cap, "  ·  hover a cell for its date") else ""
-      ggp <- ggplot(full, aes(x = round_idx, y = dimension, fill = severity)) +
+      cap_txt <- if (nzchar(cap)) paste0(cap, "  ·  hover for the exact date") else ""
+      gg_bot <- ggplot(full, aes(round_idx, dimension, fill = severity)) +
         geom_tile_interactive(aes(tooltip = tip, data_id = did),
                               colour = "#ffffff", linewidth = 1.2) +
         geom_text(aes(label = lab_txt), size = 2.9, colour = "#3b2336") +
         scale_fill_gradient(low = "#f6e8f0", high = "#9B2C2C",
                             limits = c(0, 1), guide = "none") +
-        scale_x_continuous(breaks = rl$round_idx) +
+        scale_x_continuous(breaks = rl$round_idx, limits = c(0.5, n_rounds + 0.5),
+                           expand = expansion(0)) +
         scale_y_discrete(labels = dim_display) +
         labs(x = "Round", y = NULL, caption = cap_txt) +
         theme_minimal(base_size = 12) +
         theme(axis.text.x = element_text(size = 8, colour = "#6f6673"),
               axis.title.x = element_text(size = 9, colour = "#6f6673"),
-              axis.text.y = element_text(face = "bold", colour = "#5b3650"),
-              panel.grid = element_blank(),
+              axis.text.y = element_text(face = "bold", size = 9, colour = "#5b3650"),
+              axis.ticks.y = element_blank(), panel.grid = element_blank(),
+              plot.margin = margin(0, 8, 2, 8),
               plot.caption = element_text(size = 7.5, colour = "#8a7e88", hjust = 0))
-      girafe(ggobj = ggp, width_svg = 11, height_svg = 3.3,
+
+      combined <- gg_top / gg_bot + plot_layout(heights = c(1.8, 1.5))
+      girafe(ggobj = combined, width_svg = 11, height_svg = 9,
              options = list(
+               opts_sizing(rescale = TRUE, width = 1),
                opts_selection(type = "single", only_shiny = TRUE),
-               opts_hover(css = "stroke:#5b3650;stroke-width:1.5px;cursor:pointer;"),
+               opts_hover(css = "stroke:#5b3650;stroke-width:1px;cursor:pointer;"),
                opts_tooltip(css = "background:#5b3650;color:#fff;padding:5px 8px;border-radius:5px;font-size:12px;")))
     })
 
-    observeEvent(input$matrix_selected, {
-      sel <- input$matrix_selected
+    # One click handler for the whole figure: heatmap cells carry "Dim@@round"
+    # and drill into a tab; timeline bars carry the round number and set baseline.
+    observeEvent(input$board_selected, {
+      sel <- input$board_selected
       req(length(sel) == 1, nzchar(sel))
-      parts <- strsplit(sel, "@@", fixed = TRUE)[[1]]
-      dim <- parts[1]; rnd <- suppressWarnings(as.integer(parts[2]))
-      if (dim %in% c("Activity", "Bypass", "Network", "Topic") && !is.na(rnd)) {
-        prev_n <- (click_val()$n %||% 0)
-        click_val(list(dim = dim, round = rnd, n = prev_n + 1))
+      if (grepl("@@", sel, fixed = TRUE)) {
+        parts <- strsplit(sel, "@@", fixed = TRUE)[[1]]
+        dim <- parts[1]; rnd <- suppressWarnings(as.integer(parts[2]))
+        if (dim %in% c("Activity", "Bypass", "Network", "Topic") && !is.na(rnd)) {
+          prev_n <- (click_val()$n %||% 0)
+          click_val(list(dim = dim, round = rnd, n = prev_n + 1))
+        }
+      } else {
+        r <- suppressWarnings(as.integer(sel))
+        if (!is.na(r)) {
+          r <- max(2L, min(r, n_rounds - 1L))
+          settings$baseline_split <- r
+          updateSliderInput(session, "split", value = r)
+        }
       }
     }, ignoreInit = TRUE)
 

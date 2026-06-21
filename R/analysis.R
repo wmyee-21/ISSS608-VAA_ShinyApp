@@ -292,17 +292,26 @@ score_network <- function(df, split, weight_floor = 1) {
 # Resolve a topic name and/or free-text search into a single regex pattern, the
 # same way the Evidence tab does. Search wins over the dropdown when both exist.
 resolve_topic_pattern <- function(topics = NULL, search = NULL) {
-  if (!is.null(search) && nzchar(search)) {
-    return(list(label = paste0("“", search, "”"), pattern = tolower(search)))
+  # Free-text search wins. Comma- or semicolon-separate to track several words.
+  if (!is.null(search) && nzchar(trimws(search %||% ""))) {
+    terms <- trimws(strsplit(search, "[,;]")[[1]])
+    terms <- terms[nzchar(terms)]
+    if (length(terms) > 0) {
+      lbl <- if (length(terms) == 1) paste0("“", terms, "”")
+             else paste0("search: ", paste(terms, collapse = ", "))
+      return(list(label = lbl, pattern = paste(tolower(terms), collapse = "|")))
+    }
   }
+  # Chosen topics combine with OR.
   topics <- topics[topics %in% topic_patterns_default$topic]
   if (length(topics) > 0) {
     pats <- topic_patterns_default$pattern[match(topics, topic_patterns_default$topic)]
     return(list(label = paste(topics, collapse = ", "),
                 pattern = paste(pats, collapse = "|")))
   }
-  list(label = "Compliance",
-       pattern = topic_patterns_default$pattern[topic_patterns_default$topic == "Compliance"])
+  # Nothing chosen and nothing searched -> track every topic.
+  list(label = "all topics",
+       pattern = paste(topic_patterns_default$pattern, collapse = "|"))
 }
 
 # Topic pressure per round, measured as a spike above the baseline-period rate.

@@ -23,7 +23,7 @@ sec_means_ui <- function(id) {
       selectInput(ns("topic"), "Topic",
                   choices = c("All topics", topic_patterns_default$topic),
                   selected = "All topics"),
-      textInput(ns("search"), "Or search any word"),
+      textInput(ns("search"), "Or search words (comma-separated)"),
       hr(),
       checkboxGroupInput(ns("agents"), "Agents",
                          choiceNames = unname(agent_labels),
@@ -65,7 +65,11 @@ sec_means_server <- function(id, settings, dataRev = reactive(0)) {
 
     # A topic/search filter as a single lower-case regex, or NULL for everything.
     topic_pat <- reactive({
-      if (nzchar(input$search %||% "")) return(tolower(input$search))
+      s <- input$search %||% ""
+      if (nzchar(trimws(s))) {
+        terms <- trimws(strsplit(s, "[,;]")[[1]]); terms <- terms[nzchar(terms)]
+        if (length(terms) > 0) return(paste(tolower(terms), collapse = "|"))
+      }
       t <- input$topic
       if (is.null(t) || t == "All topics") return(NULL)
       topic_patterns_default$pattern[topic_patterns_default$topic == t]
