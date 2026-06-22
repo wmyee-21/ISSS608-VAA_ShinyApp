@@ -6,8 +6,17 @@
 
 library(shiny)
 library(bslib)        # page layout: page_navbar, card, sidebar, layout_columns
-library(tidyverse)
-library(lubridate)
+# Core tidyverse packages, attached individually instead of library(tidyverse).
+# The meta-package pulls in ~25 dependencies; the app only uses these, so naming
+# them keeps the shinyapps.io package-fetch list small and deploys faster.
+library(ggplot2)      # all charts
+library(dplyr)        # data wrangling (mutate, filter, joins, case_when)
+library(tidyr)        # reshaping (pivot, fill, complete)
+library(readr)        # read_csv with explicit column types
+library(tibble)       # tibble / tribble lookups
+library(stringr)      # str_* helpers
+library(purrr)        # map_dfr in the topic and network helpers
+library(lubridate)    # date parsing
 library(DT)           # interactive evidence table
 library(ggiraph)      # hover tooltips on ggplot charts
 library(tidygraph)    # graph structures for the network section
