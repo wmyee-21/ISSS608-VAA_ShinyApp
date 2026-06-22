@@ -181,7 +181,7 @@ sec_caseboard_server <- function(id, settings, dataRev = reactive(0)) {
         dplyr::mutate(signal = s_topic)
       net <- dplyr::bind_rows(lapply(rds, function(r) {
         tibble::tibble(round_idx = r,
-                       value = nrow(build_agent_edges(messages_tbl |> dplyr::filter(round_idx == r))))
+                       value = nrow(round_edges(r)))
       })) |> dplyr::mutate(signal = s_net)
       dt <- tidyr::expand_grid(round_idx = rds, signal = sig_levels) |>
         dplyr::left_join(dplyr::bind_rows(drift, topic, net), by = c("round_idx", "signal")) |>

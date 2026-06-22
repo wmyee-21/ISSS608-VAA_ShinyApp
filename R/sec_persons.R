@@ -210,10 +210,15 @@ sec_connections_ui <- function(id) {
                        "pick a row, then read those messages."))
     ),
     card(card_header("Link timeline · when each pair was connected"),
+         checkboxGroupInput(ns("tl_agents"), "Show links involving",
+                            choiceNames = unname(agent_labels),
+                            choiceValues = names(agent_labels),
+                            selected = names(agent_labels), inline = TRUE),
          girafeOutput(ns("link_timeline"), height = "560px"),
          card_footer("Each row is a directed link. A filled cell means those ",
                      "two agents were connected that round; gaps show when a ",
-                     "link formed or dropped."))
+                     "link formed or dropped. Only links between selected agents ",
+                     "are shown, so pick at least two."))
   )
 }
 
@@ -226,6 +231,10 @@ sec_connections_server <- function(id, settings, dataRev = reactive(0)) {
     observeEvent(dataRev(), {
       updateSliderInput(session, "rounds", min = 1, max = n_rounds,
                         value = c(max(1, round(n_rounds / 3)), n_rounds))
+      updateCheckboxGroupInput(session, "tl_agents",
+                               choiceNames = unname(agent_labels),
+                               choiceValues = names(agent_labels),
+                               selected = names(agent_labels))
       selected_agent(NULL)
     }, ignoreInit = TRUE)
 
@@ -254,8 +263,8 @@ sec_connections_server <- function(id, settings, dataRev = reactive(0)) {
 
     output$net_stats <- renderUI({
       rr <- cmp()
-      e1 <- build_agent_edges(msgs() |> dplyr::filter(round_idx == rr$r1))
-      e2 <- build_agent_edges(msgs() |> dplyr::filter(round_idx == rr$r2))
+      e1 <- round_edges(rr$r1)
+      e2 <- round_edges(rr$r2)
       newl <- nrow(dplyr::anti_join(e2, e1, by = c("from", "to")))
       drop <- nrow(dplyr::anti_join(e1, e2, by = c("from", "to")))
       HTML(paste0("<span class='stat-num'>", newl, "</span>",
@@ -281,8 +290,8 @@ sec_connections_server <- function(id, settings, dataRev = reactive(0)) {
     output$diff_summary <- renderUI({
       if (input$view != "graph") return(NULL)
       rr <- cmp(); if (rr$r1 == rr$r2) return(NULL)
-      e1 <- build_agent_edges(msgs() |> dplyr::filter(round_idx == rr$r1))
-      e2 <- build_agent_edges(msgs() |> dplyr::filter(round_idx == rr$r2))
+      e1 <- round_edges(rr$r1)
+      e2 <- round_edges(rr$r2)
       dropped <- dplyr::anti_join(e1, e2, by = c("from", "to"))
       if (nrow(dropped) == 0)
         return(HTML(paste0("<p style='margin:6px 0;color:#4A5568'>No links from round ",
@@ -309,8 +318,8 @@ sec_connections_server <- function(id, settings, dataRev = reactive(0)) {
       panel_levels <- c(lab1, lab2)
 
       if (input$view == "graph") {
-        e1 <- build_agent_edges(msgs() |> dplyr::filter(round_idx == r1))
-        e2 <- build_agent_edges(msgs() |> dplyr::filter(round_idx == r2))
+        e1 <- round_edges(r1)
+        e2 <- round_edges(r2)
         validate(need(nrow(e1) + nrow(e2) > 0,
                       "No agent-to-agent messages in either selected round."))
         k1 <- paste(e1$from, e1$to); k2 <- paste(e2$from, e2$to)
@@ -468,7 +477,7 @@ sec_connections_server <- function(id, settings, dataRev = reactive(0)) {
     node_links <- reactive({
       a <- selected_agent(); req(a)
       r2 <- suppressWarnings(as.integer(input$net_round %||% cmp()$r2))
-      e <- build_agent_edges(msgs() |> dplyr::filter(round_idx == r2))
+      e <- round_edges(r2)
       if (nrow(e) == 0)
         return(tibble::tibble(partner = character(0), Sent = numeric(0),
                               Received = numeric(0), Total = numeric(0)))
@@ -513,10 +522,18 @@ sec_connections_server <- function(id, settings, dataRev = reactive(0)) {
       dataRev()
       rds <- sort(unique(messages_tbl$round_idx))
       all_e <- purrr::map_dfr(rds, function(r) {
-        build_agent_edges(messages_tbl |> dplyr::filter(round_idx == r)) |>
+        round_edges(r) |>
           dplyr::mutate(round_idx = r)
       })
       validate(need(nrow(all_e) > 0, "No agent-to-agent links in this dataset."))
+      # Keep only links where BOTH agents are selected, so a single agent (which
+      # cannot link to itself) yields nothing and a set of N shows the links
+      # among those N.
+      sel <- input$tl_agents
+      if (!is.null(sel) && length(sel) > 0)
+        all_e <- all_e |> dplyr::filter(from %in% sel & to %in% sel)
+      validate(need(nrow(all_e) > 0,
+                    "Select at least two connected agents to show links."))
       all_e <- all_e |>
         dplyr::mutate(pair = paste0(agent_labels[from], " → ", agent_labels[to]))
       ord <- all_e |> dplyr::group_by(pair) |>

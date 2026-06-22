@@ -158,8 +158,12 @@ apply_bundle <- function(b) {
   public_unmonitored <<- b$public_unmonitored
   n_rounds           <<- b$n_rounds
   if (!is.null(b$recipient_to_agent)) recipient_to_agent <<- b$recipient_to_agent
+  rebuild_edge_cache()   # refresh the per-round edge cache for the new dataset
   invisible(TRUE)
 }
 
 # Source every section module.
 for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+
+# Warm the per-round edge cache once for the packaged dataset.
+rebuild_edge_cache()

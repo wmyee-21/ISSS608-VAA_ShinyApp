@@ -77,6 +77,12 @@ round_date_caption <- function(df = messages_tbl) {
 # replies (responding_to) resolved to the author of the message replied to. The
 # reply edges matter because many internal messages record no named recipient, so
 # without them the baseline rounds would look empty.
+#
+# Performance: the per-round edges and the message-author lookup do not change
+# while the sliders move, so they are cached per dataset (see rebuild_edge_cache
+# and round_edges). Recomputing them on every slider tick was the main lag.
+edge_cache <- new.env(parent = emptyenv())
+
 build_agent_edges <- function(df) {
   rec <- df |>
     dplyr::filter(!is.na(recipients_csv), recipients_csv != "",
@@ -87,9 +93,10 @@ build_agent_edges <- function(df) {
     dplyr::transmute(from = as.character(agent_id), to = to)
 
   rep <- tibble::tibble(from = character(0), to = character(0))
-  if ("responding_to" %in% names(df) && exists("messages_tbl")) {
-    id2agent <- setNames(as.character(messages_tbl$agent_id),
-                         as.character(messages_tbl$message_id))
+  if ("responding_to" %in% names(df)) {
+    id2agent <- if (!is.null(edge_cache$id2agent)) edge_cache$id2agent
+                else setNames(as.character(messages_tbl$agent_id),
+                              as.character(messages_tbl$message_id))
     rep <- df |>
       dplyr::filter(!is.na(responding_to), responding_to != "") |>
       dplyr::mutate(to = unname(id2agent[as.character(responding_to)])) |>
@@ -99,6 +106,28 @@ build_agent_edges <- function(df) {
 
   dplyr::bind_rows(rec, rep) |>
     dplyr::count(from, to, name = "weight")
+}
+
+# Build the per-round edge cache and the message-author lookup once per dataset.
+# Call after the data loads and after every apply_bundle().
+rebuild_edge_cache <- function() {
+  if (!exists("messages_tbl")) return(invisible(FALSE))
+  edge_cache$id2agent <- setNames(as.character(messages_tbl$agent_id),
+                                  as.character(messages_tbl$message_id))
+  rds <- sort(unique(messages_tbl$round_idx))
+  edge_cache$by_round <- setNames(
+    lapply(rds, function(r)
+      build_agent_edges(messages_tbl[messages_tbl$round_idx == r, , drop = FALSE])),
+    as.character(rds))
+  invisible(TRUE)
+}
+
+# Cached edges for one round (falls back to computing if the cache is cold).
+round_edges <- function(r) {
+  e <- if (!is.null(edge_cache$by_round)) edge_cache$by_round[[as.character(r)]] else NULL
+  if (is.null(e))
+    build_agent_edges(messages_tbl[messages_tbl$round_idx == r, , drop = FALSE])
+  else e
 }
 
 # --- Signal 1: Channel drift -------------------------------------------------
@@ -269,7 +298,7 @@ score_bypass <- function(df) {
 score_network <- function(df, split, weight_floor = 1) {
   base_rounds <- sort(unique(df$round_idx[df$round_idx <= split]))
   links_in <- function(r) {
-    e <- build_agent_edges(df |> dplyr::filter(round_idx == r))
+    e <- round_edges(r)
     e <- e[e$weight >= weight_floor, , drop = FALSE]
     if (nrow(e) == 0) character(0) else paste(e$from, e$to)
   }
