@@ -122,9 +122,11 @@ sec_means_server <- function(id, settings, dataRev = reactive(0)) {
       else focus_round(NULL)
     }, ignoreInit = TRUE)
     observeEvent(input$clear, focus_round(NULL))
-    observeEvent(list(input$bypass_only, input$topic, input$search,
-                      input$period, input$agents),
-                 focus_round(NULL), ignoreInit = TRUE)
+    # Only a period change can push a focused round out of range, so only that
+    # clears the focus. The other filters (lens, topic, agents) keep it. This
+    # also lets a Case Board drill set the lens and the round together without
+    # the programmatic input updates wiping the round it just focused.
+    observeEvent(input$period, focus_round(NULL), ignoreInit = TRUE)
 
     # ---- Cross-tab routing ---------------------------------------------------
     # Read these messages, from the Connections tab: all chats for the two agents.
@@ -157,7 +159,7 @@ sec_means_server <- function(id, settings, dataRev = reactive(0)) {
             updateSelectInput(session, "topic", selected = tsel)
           else updateSelectInput(session, "topic", selected = "All topics")
         }
-        focus_round(NULL)
+        if (!is.null(r) && !is.na(r)) focus_round(r) else focus_round(NULL)
       }
     }, ignoreInit = TRUE)
 

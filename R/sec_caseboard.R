@@ -264,6 +264,9 @@ sec_caseboard_server <- function(id, settings, dataRev = reactive(0)) {
           updateSliderInput(session, "split", value = r)
         }
       }
+      # Clear the visual selection so the clicked cell or bar does not stay
+      # highlighted and block the next click. The action has already been read.
+      session$sendCustomMessage(paste0(session$ns("board"), "_set"), character(0))
     }, ignoreInit = TRUE)
 
     output$stats <- renderUI({
