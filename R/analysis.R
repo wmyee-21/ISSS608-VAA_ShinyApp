@@ -406,8 +406,11 @@ build_matrix <- function(df, split, strict, topic_pattern = NULL,
 reading_strip <- function(stats_output_id, desc_html = NULL) {
   card(
     class = "reading-strip",
+    fill = FALSE,
     card_body(
-      div(class = "reading-stats", htmlOutput(stats_output_id))
+      class = "reading-stats",
+      fill = FALSE,
+      htmlOutput(stats_output_id)
     )
   )
 }

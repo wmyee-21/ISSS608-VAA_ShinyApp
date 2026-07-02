@@ -43,8 +43,10 @@ app_theme <- bs_theme(
                      border-left:4px solid #c4708f; }
     .reading-strip .card-body { padding:.5rem .85rem; }
     .stat-num { font-size:1.8em; font-weight:800; color:#5b3650;
-                font-family:'Playfair Display',serif; }
-    .stat-sub { color:#6f6673; font-size:.9rem; }
+                font-family:'Playfair Display',serif; line-height:1; }
+    .stat-sub { color:#6f6673; font-size:.9rem; line-height:1.2; }
+    .reading-stats { line-height:1.2; }
+    .reading-stats .stat-sub { margin:0; }
 
     /* Inner sub-tabs */
     .nav-tabs .nav-link { color:#7d4a67; font-weight:600; }

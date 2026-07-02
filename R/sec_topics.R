@@ -52,7 +52,7 @@ sec_topics_ui <- function(id) {
     layout_columns(
       col_widths = c(12, 12),
       card(card_header(textOutput(ns("title"))),
-           girafeOutput(ns("plot"), height = "320px")),
+           girafeOutput(ns("plot"), height = "270px")),
       card(card_header("Messages behind this view"),
            DTOutput(ns("tbl")))
     )

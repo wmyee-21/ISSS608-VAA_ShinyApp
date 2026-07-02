@@ -29,11 +29,11 @@ sec_behaviour_ui <- function(id) {
     layout_columns(
       col_widths = c(7, 5),
       card(card_header("Channel activity for the selected round"),
-           girafeOutput(ns("abnormal"), height = "360px"),
+           girafeOutput(ns("abnormal"), height = "300px"),
            card_footer("Click an agent to open the Connections tab for this round.")),
       card(card_header("When drift happens, and who drifts"),
            tags$strong("Drifting channels per round"),
-           girafeOutput(ns("flagged"), height = "200px"),
+           girafeOutput(ns("flagged"), height = "170px"),
            hr(),
            tags$strong("Agents that drifted most"),
            htmlOutput(ns("drifters")))
@@ -199,7 +199,7 @@ sec_connections_ui <- function(id) {
       col_widths = c(8, 4),
       card(card_header(textOutput(ns("net_title"))),
            htmlOutput(ns("diff_summary")),
-           girafeOutput(ns("net_plot"), height = "470px")),
+           girafeOutput(ns("net_plot"), height = "400px")),
       card(card_header(textOutput(ns("net_node_title"))),
            uiOutput(ns("net_round_pick")),
            DTOutput(ns("net_node_tbl")),
@@ -209,16 +209,19 @@ sec_connections_ui <- function(id) {
            card_footer("Click a node in the graph to list its connections, ",
                        "pick a row, then read those messages."))
     ),
-    card(card_header("Link timeline · when each pair was connected"),
-         checkboxGroupInput(ns("tl_agents"), "Show links involving",
-                            choiceNames = unname(agent_labels),
-                            choiceValues = names(agent_labels),
-                            selected = names(agent_labels), inline = TRUE),
-         girafeOutput(ns("link_timeline"), height = "560px"),
-         card_footer("Each row is a directed link. A filled cell means those ",
-                     "two agents were connected that round; gaps show when a ",
-                     "link formed or dropped. Only links between selected agents ",
-                     "are shown, so pick at least two."))
+    accordion(open = FALSE,
+      accordion_panel(
+        "Link timeline · when each pair was connected",
+        icon = icon("clock-rotate-left"),
+        checkboxGroupInput(ns("tl_agents"), "Show links involving",
+                           choiceNames = unname(agent_labels),
+                           choiceValues = names(agent_labels),
+                           selected = names(agent_labels), inline = TRUE),
+        girafeOutput(ns("link_timeline"), height = "440px"),
+        helpText("Each row is a directed link. A filled cell means those ",
+                 "two agents were connected that round; gaps show when a ",
+                 "link formed or dropped. Only links between selected agents ",
+                 "are shown, so pick at least two.")))
   )
 }
 

@@ -42,7 +42,7 @@ sec_network_ui <- function(id) {
     ),
     card(card_header(textOutput(ns("title"))),
          htmlOutput(ns("diff_summary")),
-         girafeOutput(ns("plot"), height = "480px"))
+         girafeOutput(ns("plot"), height = "400px"))
   )
 }
 

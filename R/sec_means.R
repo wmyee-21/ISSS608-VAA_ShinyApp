@@ -41,11 +41,13 @@ sec_means_ui <- function(id) {
       helpText("Click a bar in the plot to focus the table on that round.")
     ),
     reading_strip(ns("evi_stats")),
-    card(card_header(textOutput(ns("plot_title"))),
-         girafeOutput(ns("main_plot"), height = "300px"),
-         card_footer(textOutput(ns("plot_foot")))),
-    card(card_header(textOutput(ns("tbl_title"))),
-         DTOutput(ns("main_tbl")))
+    layout_columns(
+      col_widths = c(5, 7),
+      card(card_header(textOutput(ns("plot_title"))),
+           girafeOutput(ns("main_plot"), height = "300px"),
+           card_footer(textOutput(ns("plot_foot")))),
+      card(card_header(textOutput(ns("tbl_title"))),
+           DTOutput(ns("main_tbl"))))
   )
 }
 

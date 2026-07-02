@@ -17,6 +17,7 @@
 sec_caseboard_ui <- function(id) {
   ns <- NS(id)
   layout_sidebar(
+    fillable = FALSE,
     sidebar = sidebar(
       width = "27%",
 
@@ -66,7 +67,7 @@ sec_caseboard_ui <- function(id) {
 
     card(
       card_header(textOutput(ns("matrix_title"))),
-      girafeOutput(ns("board"), height = "820px"),
+      girafeOutput(ns("board"), height = "470px"),
       card_footer("Top strips set the baseline — click a bar (shaded rounds are ",
                   "the baseline period). Heatmap below — darker is more abnormal; ",
                   "click a cell to investigate that round.")
@@ -235,8 +236,8 @@ sec_caseboard_server <- function(id, settings, dataRev = reactive(0)) {
               plot.margin = margin(0, 8, 2, 8),
               plot.caption = element_text(size = 7.5, colour = "#8a7e88", hjust = 0))
 
-      combined <- gg_top / gg_bot + plot_layout(heights = c(1.8, 1.5))
-      girafe(ggobj = combined, width_svg = 11, height_svg = 9,
+      combined <- gg_top / gg_bot + plot_layout(heights = c(1.15, 1.0))
+      girafe(ggobj = combined, width_svg = 11, height_svg = 4.6,
              options = list(
                opts_sizing(rescale = TRUE, width = 1),
                opts_selection(type = "single", only_shiny = TRUE),

@@ -5,3 +5,6 @@
 
 # shinyapps.io deployment metadata
 rsconnect/
+
+/.quarto/
+**/*.quarto_ipynb

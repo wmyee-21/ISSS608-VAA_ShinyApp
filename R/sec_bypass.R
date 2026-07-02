@@ -46,7 +46,7 @@ sec_bypass_ui <- function(id) {
     layout_columns(
       col_widths = c(12, 12),
       card(card_header("Posts that reached the outside world without oversight"),
-           girafeOutput(ns("plot"), height = "300px"),
+           girafeOutput(ns("plot"), height = "260px"),
            card_footer("Bars are coloured by agent. Solid bars are stronger ",
                        "bypasses; faded bars had accountable discussion nearby ",
                        "and are likely explained.")),
